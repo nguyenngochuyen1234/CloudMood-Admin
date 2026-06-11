@@ -1,9 +1,29 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { R2Service } from '../upload/r2.service';
 
 @Injectable()
 export class AdminService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(AdminService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private readonly r2: R2Service,
+  ) {}
+
+  private mapEmojiPairConflict(error: unknown): never {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw new ConflictException(
+        'Each emoji_type can only have one emoji for each emotion',
+      );
+    }
+
+    throw error;
+  }
 
   // ==================== USERS ====================
   async getUsers() {
@@ -98,21 +118,72 @@ export class AdminService {
   }
 
   // ==================== EMOJIS ====================
-  async getEmojis() {
+  async getEmojis(typeId?: bigint) {
     return this.prisma.emoji.findMany({
+      where: typeId ? { typeId } : undefined,
       include: { type: true, emotion: true },
       orderBy: { id: 'asc' },
     });
   }
 
   async createEmoji(data: { id: bigint; imageUrl: string; typeId: bigint; emotionId: bigint }) {
-    return this.prisma.emoji.create({ data });
+    try {
+      return await this.prisma.emoji.create({ data });
+    } catch (error) {
+      this.mapEmojiPairConflict(error);
+    }
   }
 
   async updateEmoji(id: bigint, data: Partial<{ imageUrl: string; typeId: bigint; emotionId: bigint }>) {
     const existing = await this.prisma.emoji.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Emoji not found');
-    return this.prisma.emoji.update({ where: { id }, data });
+
+    const nextTypeId = data.typeId ?? existing.typeId;
+    const nextEmotionId = data.emotionId ?? existing.emotionId;
+    const finalImageUrl = data.imageUrl ?? existing.imageUrl;
+
+    try {
+      let replacedEmojiImageUrl: string | null = null;
+
+      const updatedEmoji = await this.prisma.$transaction(async tx => {
+        const conflictingEmoji = await tx.emoji.findFirst({
+          where: {
+            typeId: nextTypeId,
+            emotionId: nextEmotionId,
+            NOT: { id },
+          },
+          select: {
+            id: true,
+            imageUrl: true,
+          },
+        });
+
+        if (conflictingEmoji) {
+          replacedEmojiImageUrl = conflictingEmoji.imageUrl;
+          await tx.emoji.delete({ where: { id: conflictingEmoji.id } });
+        }
+
+        return tx.emoji.update({ where: { id }, data });
+      });
+
+      if (
+        replacedEmojiImageUrl &&
+        replacedEmojiImageUrl !== finalImageUrl
+      ) {
+        try {
+          await this.r2.deleteByUrl(replacedEmojiImageUrl);
+        } catch (error) {
+          this.logger.error(
+            `Failed to delete replaced emoji image from R2: ${replacedEmojiImageUrl}`,
+            error instanceof Error ? error.stack : undefined,
+          );
+        }
+      }
+
+      return updatedEmoji;
+    } catch (error) {
+      this.mapEmojiPairConflict(error);
+    }
   }
 
   async deleteEmoji(id: bigint) {
@@ -122,18 +193,22 @@ export class AdminService {
   }
 
   async bulkCreateEmojis(emojis: Array<{ id: number; imageUrl: string; typeId: number; emotionId: number }>) {
-    return this.prisma.$transaction(
-      emojis.map(item =>
-        this.prisma.emoji.create({
-          data: {
-            id: BigInt(item.id),
-            imageUrl: item.imageUrl,
-            typeId: BigInt(item.typeId),
-            emotionId: BigInt(item.emotionId),
-          },
-        }),
-      ),
-    );
+    try {
+      return await this.prisma.$transaction(
+        emojis.map(item =>
+          this.prisma.emoji.create({
+            data: {
+              id: BigInt(item.id),
+              imageUrl: item.imageUrl,
+              typeId: BigInt(item.typeId),
+              emotionId: BigInt(item.emotionId),
+            },
+          }),
+        ),
+      );
+    } catch (error) {
+      this.mapEmojiPairConflict(error);
+    }
   }
 
   // ==================== THEMES ====================

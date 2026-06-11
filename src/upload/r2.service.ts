@@ -1,5 +1,5 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { extname } from 'path';
 
 @Injectable()
@@ -45,5 +45,42 @@ export class R2Service {
     );
 
     return `${this.publicUrl}/${key}`;
+  }
+
+  async deleteByUrl(url: string): Promise<boolean> {
+    const key = this.extractKeyFromUrl(url);
+    if (!key) {
+      return false;
+    }
+
+    await this.client.send(
+      new DeleteObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+      }),
+    );
+
+    return true;
+  }
+
+  private extractKeyFromUrl(url: string): string | null {
+    try {
+      const publicUrl = new URL(this.publicUrl);
+      const targetUrl = new URL(url);
+
+      if (publicUrl.origin !== targetUrl.origin) {
+        return null;
+      }
+
+      const basePath = publicUrl.pathname.replace(/\/$/, '');
+      if (basePath && !targetUrl.pathname.startsWith(`${basePath}/`)) {
+        return null;
+      }
+
+      const relativePath = targetUrl.pathname.slice(basePath.length).replace(/^\/+/, '');
+      return relativePath || null;
+    } catch {
+      return null;
+    }
   }
 }

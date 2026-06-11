@@ -60,6 +60,7 @@ model Emoji {
   type      EmojiType @relation(fields: [typeId], references: [id], onDelete: Cascade)
   emotion   Emotion   @relation(fields: [emotionId], references: [id], onDelete: Cascade)
 
+  @@unique([typeId, emotionId])
   @@map("emojis")
 }
 

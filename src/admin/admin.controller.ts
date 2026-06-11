@@ -118,8 +118,17 @@ export class AdminController {
 
   // ==================== EMOJIS ====================
   @Get('emojis')
-  getEmojis() {
-    return this.adminService.getEmojis();
+  getEmojis(@Query('typeId') typeId?: string) {
+    if (typeId === undefined) {
+      return this.adminService.getEmojis();
+    }
+
+    const parsedTypeId = Number(typeId);
+    if (!Number.isInteger(parsedTypeId) || parsedTypeId <= 0) {
+      throw new BadRequestException('typeId must be a positive integer');
+    }
+
+    return this.adminService.getEmojis(BigInt(parsedTypeId));
   }
 
   @Post('emojis/bulk')
