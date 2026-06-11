@@ -396,7 +396,8 @@ Body:
 
 Note:
 
-- moi cap `typeId` + `emotionId` chi duoc ton tai mot lan
+- neu cap `typeId` + `emotionId` da ton tai o emoji khac, backend se xoa bang ghi cu roi tao bang ghi moi
+- neu anh cua bang ghi bi thay the nam tren R2 hien tai, backend se xoa anh do tren R2
 
 Body:
 

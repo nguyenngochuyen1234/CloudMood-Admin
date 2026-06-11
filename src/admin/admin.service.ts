@@ -25,6 +25,50 @@ export class AdminService {
     throw error;
   }
 
+  private async deleteConflictingEmojiByPair(
+    tx: Prisma.TransactionClient,
+    typeId: bigint,
+    emotionId: bigint,
+    excludeId?: bigint,
+  ): Promise<string | null> {
+    const conflictingEmoji = await tx.emoji.findFirst({
+      where: {
+        typeId,
+        emotionId,
+        ...(excludeId ? { NOT: { id: excludeId } } : {}),
+      },
+      select: {
+        id: true,
+        imageUrl: true,
+      },
+    });
+
+    if (!conflictingEmoji) {
+      return null;
+    }
+
+    await tx.emoji.delete({ where: { id: conflictingEmoji.id } });
+    return conflictingEmoji.imageUrl;
+  }
+
+  private async deleteEmojiImageIfNeeded(
+    imageUrl: string | null,
+    preservedImageUrl?: string,
+  ) {
+    if (!imageUrl || imageUrl === preservedImageUrl) {
+      return;
+    }
+
+    try {
+      await this.r2.deleteByUrl(imageUrl);
+    } catch (error) {
+      this.logger.error(
+        `Failed to delete replaced emoji image from R2: ${imageUrl}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+  }
+
   // ==================== USERS ====================
   async getUsers() {
     return this.prisma.user.findMany({
@@ -128,7 +172,24 @@ export class AdminService {
 
   async createEmoji(data: { id: bigint; imageUrl: string; typeId: bigint; emotionId: bigint }) {
     try {
-      return await this.prisma.emoji.create({ data });
+      let replacedEmojiImageUrl: string | null = null;
+
+      const createdEmoji = await this.prisma.$transaction(async tx => {
+        replacedEmojiImageUrl = await this.deleteConflictingEmojiByPair(
+          tx,
+          data.typeId,
+          data.emotionId,
+        );
+
+        return tx.emoji.create({ data });
+      });
+
+      await this.deleteEmojiImageIfNeeded(
+        replacedEmojiImageUrl,
+        data.imageUrl,
+      );
+
+      return createdEmoji;
     } catch (error) {
       this.mapEmojiPairConflict(error);
     }
@@ -146,39 +207,17 @@ export class AdminService {
       let replacedEmojiImageUrl: string | null = null;
 
       const updatedEmoji = await this.prisma.$transaction(async tx => {
-        const conflictingEmoji = await tx.emoji.findFirst({
-          where: {
-            typeId: nextTypeId,
-            emotionId: nextEmotionId,
-            NOT: { id },
-          },
-          select: {
-            id: true,
-            imageUrl: true,
-          },
-        });
-
-        if (conflictingEmoji) {
-          replacedEmojiImageUrl = conflictingEmoji.imageUrl;
-          await tx.emoji.delete({ where: { id: conflictingEmoji.id } });
-        }
+        replacedEmojiImageUrl = await this.deleteConflictingEmojiByPair(
+          tx,
+          nextTypeId,
+          nextEmotionId,
+          id,
+        );
 
         return tx.emoji.update({ where: { id }, data });
       });
 
-      if (
-        replacedEmojiImageUrl &&
-        replacedEmojiImageUrl !== finalImageUrl
-      ) {
-        try {
-          await this.r2.deleteByUrl(replacedEmojiImageUrl);
-        } catch (error) {
-          this.logger.error(
-            `Failed to delete replaced emoji image from R2: ${replacedEmojiImageUrl}`,
-            error instanceof Error ? error.stack : undefined,
-          );
-        }
-      }
+      await this.deleteEmojiImageIfNeeded(replacedEmojiImageUrl, finalImageUrl);
 
       return updatedEmoji;
     } catch (error) {
