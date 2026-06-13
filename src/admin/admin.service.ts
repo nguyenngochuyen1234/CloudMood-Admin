@@ -258,6 +258,39 @@ export class AdminService {
     });
   }
 
+  async getThemesForHome() {
+    return this.prisma.theme.findMany({
+      select: {
+        id: true,
+        name: true,
+        mode: true,
+        isActive: true,
+        isPro: true,
+        colorsJson: true,
+        createdAt: true,
+        themeImages: {
+          where: { type: 'home' },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getThemeById(id: string) {
+    const theme = await this.prisma.theme.findUnique({
+      where: { id },
+      include: { themeImages: true },
+    });
+
+    if (!theme) {
+      throw new NotFoundException('Theme not found');
+    }
+
+    return theme;
+  }
+
   async createTheme(data: {
     name: string;
     mode?: string;

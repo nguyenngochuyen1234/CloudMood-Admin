@@ -169,6 +169,16 @@ export class AdminController {
     return this.adminService.getThemes();
   }
 
+  @Get('themes/home')
+  getThemesForHome() {
+    return this.adminService.getThemesForHome();
+  }
+
+  @Get('themes/:id')
+  getThemeById(@Param('id') id: string) {
+    return this.adminService.getThemeById(id);
+  }
+
   @Post('themes')
   @UseGuards(JwtAuthGuard, AdminRoleGuard)
   createTheme(@Body() body: any) {

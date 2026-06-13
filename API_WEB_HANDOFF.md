@@ -228,6 +228,38 @@ Response item:
 }
 ```
 
+`GET /admin/themes/home`
+
+Response item:
+
+```json
+{
+  "id": "uuid",
+  "name": "Sunrise",
+  "mode": "light",
+  "isActive": true,
+  "isPro": false,
+  "colorsJson": {
+    "primary": "#FF8A65",
+    "background": "#FFF3E0"
+  },
+  "createdAt": "2026-06-10T15:00:00.000Z",
+  "themeImages": [
+    {
+      "id": "uuid",
+      "themeId": "uuid",
+      "type": "home",
+      "imageUrl": "https://cdn.example.com/themes/home.png",
+      "createdAt": "2026-06-10T15:00:00.000Z"
+    }
+  ]
+}
+```
+
+`GET /admin/themes/:id`
+
+Response: giong item cua `GET /admin/themes`, nhung chi tra ve 1 theme theo `id`. Neu khong tim thay se tra `404 Theme not found`.
+
 ### 10. Events
 
 `GET /admin/events`
